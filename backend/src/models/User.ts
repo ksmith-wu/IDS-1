@@ -1,24 +1,22 @@
-import mongoose, { Document, Schema, Model } from 'mongoose';
+import mongoose, { Document, Schema, Model, ObjectId } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
+// Interface for User document
 export interface IUser extends Document {
   email: string;
   password: string;
   name: string;
-  role: 'admin' | 'user';
+  role_id: ObjectId;  // Ue role_id reference instead of enum
   createdAt: Date;
-  loginAttempts?: number;
-  lockUntil?: Date;
-  isLocked: boolean;
   comparePassword(candidatePassword: string): Promise<boolean>;
-  incLoginAttempts(): Promise<void>;
-  resetLoginAttempts(): Promise<void>;
 }
 
+// Interface for User model (optional static methods can go here)
 export interface IUserModel extends Model<IUser> {
   // Add any static methods here if needed
 }
 
+// Define schema
 const userSchema = new Schema<IUser, IUserModel>({
   email: {
     type: String,
@@ -37,26 +35,19 @@ const userSchema = new Schema<IUser, IUserModel>({
     required: true,
     trim: true,
   },
-  role: {
-    type: String,
-    enum: ['admin', 'user'],
-    default: 'user',
+  role_id: {
+    type: Schema.Types.ObjectId,
+    ref: 'Role',          // References Role collection
+    required: true,
   },
   createdAt: {
     type: Date,
     default: Date.now,
   },
-  loginAttempts: {
-    type: Number,
-    default: 0,
-  },
-  lockUntil: {
-    type: Date,
-  },
 });
 
 // Hash password before saving
-userSchema.pre('save', async function(next) {
+userSchema.pre('save', async function (next) {
   if (!this.isModified('password')) return next();
   
   try {
@@ -68,45 +59,11 @@ userSchema.pre('save', async function(next) {
   }
 });
 
-// Virtual to check if account is locked
-userSchema.virtual('isLocked').get(function(this: any) {
-  return !!(this.lockUntil && this.lockUntil.getTime() > Date.now());
-});
-
 // Method to compare passwords
-userSchema.methods.comparePassword = async function(candidatePassword: string): Promise<boolean> {
+userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {
   return bcrypt.compare(candidatePassword, this.password);
-};
-
-// Method to increment login attempts and potentially lock account
-userSchema.methods.incLoginAttempts = async function(this: any): Promise<void> {
-  const MAX_LOGIN_ATTEMPTS = 3;
-  const LOCK_TIME = 30 * 1000; // 30 seconds
-
-  // If lock expired, reset counters
-  if (this.lockUntil && this.lockUntil.getTime() <= Date.now()) {
-    await this.updateOne({ $unset: { loginAttempts: 1, lockUntil: 1 } });
-    this.loginAttempts = 0;
-    this.lockUntil = undefined;
-  }
-
-  const nextAttempts = (this.loginAttempts || 0) + 1;
-  const updates: any = { $set: { loginAttempts: nextAttempts } };
-
-  if (nextAttempts >= MAX_LOGIN_ATTEMPTS && !this.isLocked) {
-    updates.$set.lockUntil = new Date(Date.now() + LOCK_TIME);
-  }
-
-  await this.updateOne(updates);
-};
-
-// Method to reset login attempts
-userSchema.methods.resetLoginAttempts = async function(this: any): Promise<void> {
-  await this.updateOne({ $unset: { loginAttempts: 1, lockUntil: 1 } });
-  this.loginAttempts = 0;
-  this.lockUntil = undefined;
 };
 
 // Create and export the model
 const User = mongoose.model<IUser, IUserModel>('User', userSchema);
-export { User }; 
+export { User };
